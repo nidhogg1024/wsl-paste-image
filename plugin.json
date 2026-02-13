@@ -1,9 +1,9 @@
 {
     "pluginName": "终端贴图助手",
-    "description": "截图后自动转为 WSL 路径，在终端中粘贴即可引用图片（适用于 Cursor/AI 终端、WSL 等场景）",
+    "description": "截图后自动转为 WSL 路径，在终端中粘贴即可引用图片",
     "author": "nidhogg1024",
     "homepage": "https://github.com/nidhogg1024/wsl-paste-image",
-    "main": "index.html",
+    "preload": "preload.js",
     "logo": "logo.png",
     "version": "1.0.0",
     "pluginSetting": {
@@ -12,26 +12,26 @@
     "features": [
         {
             "code": "wsl-paste-screenshot",
-            "explain": "截图并转换为 WSL 路径",
+            "explain": "截图并转换为 WSL 路径（自动复制到剪贴板）",
             "cmds": [
                 "终端贴图",
                 "截图转路径",
                 "WSL 贴图",
                 "wsl paste",
-                "screenshot",
-                "paste image",
+                "screenshot to path",
                 "贴图"
-            ]
+            ],
+            "mode": "none"
         },
         {
             "code": "wsl-paste-clipboard",
-            "explain": "将剪贴板图片转换为 WSL 路径",
+            "explain": "将剪贴板中的图片转为 WSL 路径",
             "cmds": [
                 "剪贴板转路径",
                 "clipboard to path",
-                "WSL 剪贴板",
                 "剪贴板图片"
-            ]
+            ],
+            "mode": "none"
         }
     ]
 }

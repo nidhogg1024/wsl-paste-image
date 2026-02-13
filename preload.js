@@ -1,166 +1,174 @@
 const { clipboard, nativeImage } = require("electron");
-const { execSync, exec } = require("child_process");
+const { execSync, execFile } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
 
-/**
- * 检测已安装的截图工具
- * 优先级：PixPin > Snipaste > ShareX > 系统自带
- */
-function detectScreenshotTool() {
-    const tools = [
-        {
-            name: "PixPin",
-            // PixPin 默认安装路径
-            paths: [
-                path.join(process.env.LOCALAPPDATA || "", "PixPin", "PixPin.exe"),
-                path.join(process.env.PROGRAMFILES || "", "PixPin", "PixPin.exe"),
-            ],
-            // PixPin 截图命令行参数
-            args: ["screenshot"],
-        },
-        {
-            name: "Snipaste",
-            paths: [
-                path.join(process.env.LOCALAPPDATA || "", "Snipaste", "Snipaste.exe"),
-                path.join(process.env.PROGRAMFILES || "", "Snipaste", "Snipaste.exe"),
-                path.join(process.env["PROGRAMFILES(X86)"] || "", "Snipaste", "Snipaste.exe"),
-            ],
-            args: ["snip"],
-        },
-        {
-            name: "ShareX",
-            paths: [
-                path.join(process.env.LOCALAPPDATA || "", "ShareX", "ShareX.exe"),
-                path.join(process.env.PROGRAMFILES || "", "ShareX", "ShareX.exe"),
-            ],
-            args: ["-RectangleRegion"],
-        },
-    ];
+// ===== 工具函数 =====
 
-    for (const tool of tools) {
-        for (const p of tool.paths) {
-            if (fs.existsSync(p)) {
-                return { name: tool.name, path: p, args: tool.args };
-            }
-        }
-        // 也尝试通过 where 命令查找（在 PATH 中的情况）
-        try {
-            const result = execSync(`where ${tool.name}`, { encoding: "utf-8", timeout: 3000 }).trim();
-            if (result) {
-                return { name: tool.name, path: result.split("\n")[0].trim(), args: tool.args };
-            }
-        } catch (_) {
-            // 未找到，继续
-        }
+/** 临时文件目录 */
+const TEMP_DIR = path.join(os.tmpdir(), "wsl-paste-image");
+
+/** 确保临时目录存在 */
+function ensureTempDir() {
+    if (!fs.existsSync(TEMP_DIR)) {
+        fs.mkdirSync(TEMP_DIR, { recursive: true });
     }
+}
 
+/** 清理超过 1 天的旧文件 */
+function cleanOldFiles() {
+    if (!fs.existsSync(TEMP_DIR)) return;
+    const now = Date.now();
+    const maxAge = 24 * 60 * 60 * 1000;
+    try {
+        for (const file of fs.readdirSync(TEMP_DIR)) {
+            const fp = path.join(TEMP_DIR, file);
+            if (now - fs.statSync(fp).mtimeMs > maxAge) fs.unlinkSync(fp);
+        }
+    } catch (_) {}
+}
+
+/** Windows 路径 → WSL 路径 */
+function toWslPath(winPath) {
+    const norm = winPath.replace(/\\/g, "/");
+    const m = norm.match(/^([a-zA-Z]):\/(.*)$/);
+    return m ? `/mnt/${m[1].toLowerCase()}/${m[2]}` : norm;
+}
+
+/** 生成带时间戳的文件名 */
+function genFileName() {
+    const ts = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
+    return `wsl_paste_${ts}.png`;
+}
+
+/** 检测截图工具，返回 { path, args } 或 null */
+function detectTool() {
+    const tools = [
+        { name: "PixPin", exe: "PixPin.exe", dirs: [process.env.LOCALAPPDATA, process.env.PROGRAMFILES], args: ["screenshot"] },
+        { name: "Snipaste", exe: "Snipaste.exe", dirs: [process.env.LOCALAPPDATA, process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"]], args: ["snip"] },
+        { name: "ShareX", exe: "ShareX.exe", dirs: [process.env.LOCALAPPDATA, process.env.PROGRAMFILES], args: ["-RectangleRegion"] },
+    ];
+    for (const t of tools) {
+        // 检查常见安装路径
+        for (const dir of t.dirs) {
+            if (!dir) continue;
+            const p = path.join(dir, t.name, t.exe);
+            if (fs.existsSync(p)) return { path: p, args: t.args, name: t.name };
+        }
+        // 检查 PATH
+        try {
+            const r = execSync(`where ${t.exe}`, { encoding: "utf-8", timeout: 2000, windowsHide: true }).trim();
+            if (r) return { path: r.split("\n")[0].trim(), args: t.args, name: t.name };
+        } catch (_) {}
+    }
     return null;
 }
 
-/**
- * 调用截图工具
- * 返回 Promise，截图完成后 resolve
- */
-function takeScreenshot() {
-    return new Promise((resolve, reject) => {
-        const tool = detectScreenshotTool();
-
-        if (tool) {
-            console.log(`使用 ${tool.name} 截图`);
-            // 调用第三方截图工具
-            const child = exec(`"${tool.path}" ${tool.args.join(" ")}`, { timeout: 30000 });
-            // 等待一小段时间让截图工具启动，然后轮询剪贴板
-            resolve({ tool: tool.name, method: "third-party" });
-        } else {
-            console.log("使用系统截图工具");
-            // 调用 Windows 自带截图工具（Win+Shift+S 效果）
-            try {
-                exec("snippingtool /clip", { timeout: 30000 });
-                resolve({ tool: "SnippingTool", method: "system" });
-            } catch (e) {
-                // 备选：ms-screenclip 协议
-                exec('start ms-screenclip:', { timeout: 30000 });
-                resolve({ tool: "ScreenClip", method: "system" });
-            }
+/** 调用截图工具（阻塞等待截图完成） */
+function callScreenshot() {
+    const tool = detectTool();
+    if (tool) {
+        // 第三方截图工具：非阻塞启动
+        execFile(tool.path, tool.args, { windowsHide: true });
+    } else {
+        // 系统截图工具
+        try {
+            execSync("snippingtool /clip", { windowsHide: true, timeout: 1000 });
+        } catch (_) {
+            execSync("start ms-screenclip:", { shell: true, windowsHide: true, timeout: 1000 });
         }
+    }
+}
+
+/** 从剪贴板保存图片，返回 Windows 路径或 null */
+function saveClipboardImage() {
+    const img = clipboard.readImage();
+    if (img.isEmpty()) return null;
+    ensureTempDir();
+    const fp = path.join(TEMP_DIR, genFileName());
+    fs.writeFileSync(fp, img.toPNG());
+    return fp;
+}
+
+/** 等待剪贴板出现新图片（轮询），返回 Promise<boolean> */
+function waitForNewImage(timeoutMs = 15000) {
+    return new Promise((resolve) => {
+        // 记录当前剪贴板图片的 dataURL 用于比对
+        const oldImg = clipboard.readImage();
+        const oldData = oldImg.isEmpty() ? "" : oldImg.toDataURL().slice(0, 200);
+        let elapsed = 0;
+        const interval = 300;
+        const timer = setInterval(() => {
+            elapsed += interval;
+            const cur = clipboard.readImage();
+            if (!cur.isEmpty()) {
+                const curData = cur.toDataURL().slice(0, 200);
+                if (curData !== oldData) {
+                    clearInterval(timer);
+                    resolve(true);
+                    return;
+                }
+            }
+            if (elapsed >= timeoutMs) {
+                clearInterval(timer);
+                resolve(false);
+            }
+        }, interval);
     });
 }
 
-/**
- * 从剪贴板读取图片并保存到临时目录
- * 返回保存的文件路径（Windows 格式）
- */
-function saveClipboardImage() {
-    const img = clipboard.readImage();
-    if (img.isEmpty()) {
-        return null;
-    }
+// ===== uTools 入口 =====
 
-    const pngBuffer = img.toPNG();
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
-    const fileName = `wsl_paste_${timestamp}.png`;
-    const tempDir = path.join(os.tmpdir(), "wsl-paste-image");
+window.exports = {
+    "wsl-paste-screenshot": {
+        mode: "none",
+        args: {
+            enter: async ({ code }) => {
+                cleanOldFiles();
 
-    // 确保目录存在
-    if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir, { recursive: true });
-    }
+                // 1. 调用截图工具
+                callScreenshot();
 
-    const filePath = path.join(tempDir, fileName);
-    fs.writeFileSync(filePath, pngBuffer);
+                // 2. 等待新截图进入剪贴板
+                const hasNew = await waitForNewImage(15000);
+                if (!hasNew) {
+                    utools.showNotification("截图超时或已取消");
+                    utools.outPlugin();
+                    return;
+                }
 
-    return filePath;
-}
+                // 3. 保存图片 + 转路径 + 写剪贴板
+                const winPath = saveClipboardImage();
+                if (!winPath) {
+                    utools.showNotification("剪贴板中没有图片");
+                    utools.outPlugin();
+                    return;
+                }
+                const wslPath = toWslPath(winPath);
+                clipboard.writeText(wslPath);
+                utools.showNotification(`已复制: ${wslPath}`);
+                utools.outPlugin();
+            },
+        },
+    },
+    "wsl-paste-clipboard": {
+        mode: "none",
+        args: {
+            enter: ({ code }) => {
+                cleanOldFiles();
 
-/**
- * Windows 路径转 WSL 路径
- * C:\Users\xxx\file.png → /mnt/c/Users/xxx/file.png
- */
-function windowsToWslPath(winPath) {
-    // 处理盘符：C:\ → /mnt/c/
-    const normalized = winPath.replace(/\\/g, "/");
-    const match = normalized.match(/^([a-zA-Z]):\/(.*)$/);
-    if (match) {
-        const drive = match[1].toLowerCase();
-        const rest = match[2];
-        return `/mnt/${drive}/${rest}`;
-    }
-    // 如果不是标准 Windows 路径，原样返回
-    return normalized;
-}
-
-/**
- * 清理过期的临时文件（超过 1 天的）
- */
-function cleanOldFiles() {
-    const tempDir = path.join(os.tmpdir(), "wsl-paste-image");
-    if (!fs.existsSync(tempDir)) return;
-
-    const now = Date.now();
-    const maxAge = 24 * 60 * 60 * 1000; // 1 天
-
-    try {
-        const files = fs.readdirSync(tempDir);
-        for (const file of files) {
-            const filePath = path.join(tempDir, file);
-            const stat = fs.statSync(filePath);
-            if (now - stat.mtimeMs > maxAge) {
-                fs.unlinkSync(filePath);
-            }
-        }
-    } catch (_) {
-        // 忽略清理错误
-    }
-}
-
-// 暴露给页面
-window.wslPaste = {
-    takeScreenshot,
-    saveClipboardImage,
-    windowsToWslPath,
-    cleanOldFiles,
-    detectScreenshotTool,
-    clipboard,
+                const winPath = saveClipboardImage();
+                if (!winPath) {
+                    utools.showNotification("剪贴板中没有图片");
+                    utools.outPlugin();
+                    return;
+                }
+                const wslPath = toWslPath(winPath);
+                clipboard.writeText(wslPath);
+                utools.showNotification(`已复制: ${wslPath}`);
+                utools.outPlugin();
+            },
+        },
+    },
 };
