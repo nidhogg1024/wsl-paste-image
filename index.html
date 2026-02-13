@@ -12,13 +12,13 @@
             user-select: none;
         }
         h2 { font-size: 16px; margin-bottom: 6px; color: #fff; }
-        .subtitle { font-size: 12px; color: #888; margin-bottom: 20px; }
+        .subtitle { font-size: 12px; color: #888; margin-bottom: 16px; }
 
         .tool-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 10px;
-            margin-bottom: 16px;
+            margin-bottom: 20px;
         }
         .tool-card {
             background: #2d2d2d;
@@ -31,33 +31,40 @@
         .tool-card:hover { border-color: #4ec9b0; }
         .tool-card.active { border-color: #4ec9b0; background: #1a3a35; }
         .tool-card .name { font-size: 14px; font-weight: bold; color: #fff; }
-        .tool-card .hotkey {
-            font-size: 12px; color: #4ec9b0; font-family: monospace; margin-top: 4px;
-        }
+        .tool-card .desc { font-size: 11px; color: #888; margin-top: 2px; }
 
-        .custom-row {
-            display: flex; align-items: center; gap: 10px; margin-bottom: 16px;
-        }
-        .custom-input {
+        .config-area {
             background: #2d2d2d;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+            display: none;
+        }
+        .config-area.show { display: block; }
+        .config-label { font-size: 13px; color: #aaa; margin-bottom: 8px; }
+        .config-row { display: flex; align-items: center; gap: 10px; }
+        .hotkey-input {
+            background: #1e1e1e;
             border: 1px solid #404040;
             border-radius: 4px;
             padding: 8px 12px;
             color: #4ec9b0;
             font-family: monospace;
-            font-size: 13px;
+            font-size: 15px;
             outline: none;
             flex: 1;
         }
-        .custom-input:focus { border-color: #4ec9b0; }
+        .hotkey-input:focus { border-color: #4ec9b0; }
         .btn {
             background: #0e639c; color: #fff; border: none; border-radius: 4px;
-            padding: 8px 16px; font-size: 13px; cursor: pointer;
+            padding: 10px 24px; font-size: 14px; cursor: pointer;
         }
         .btn:hover { background: #1177bb; }
+        .hint { font-size: 11px; color: #666; margin-top: 8px; }
 
-        .status { font-size: 13px; margin-top: 8px; }
+        .status { font-size: 13px; margin-top: 12px; }
         .status.ok { color: #6a9955; }
+        .status.err { color: #f14c4c; }
 
         .executing {
             display: flex; flex-direction: column; align-items: center;
@@ -76,31 +83,34 @@
     <!-- 设置页 -->
     <div id="settingPage" style="display:none;">
         <h2>选择你的截图工具</h2>
-        <div class="subtitle">点击即保存，之后触发「终端贴图」会自动调用对应快捷键截图</div>
+        <div class="subtitle">选择后在下方填入你实际配置的截图快捷键</div>
 
         <div class="tool-grid">
-            <div class="tool-card" data-key="ctrl+shift+x">
+            <div class="tool-card" data-tool="pixpin" data-default="ctrl+1">
                 <div class="name">PixPin</div>
-                <div class="hotkey">Ctrl + Shift + X</div>
+                <div class="desc">国产截图工具</div>
             </div>
-            <div class="tool-card" data-key="f1">
+            <div class="tool-card" data-tool="snipaste" data-default="f1">
                 <div class="name">Snipaste</div>
-                <div class="hotkey">F1</div>
+                <div class="desc">轻量截图贴图</div>
             </div>
-            <div class="tool-card" data-key="ctrl+shift+a">
+            <div class="tool-card" data-tool="sharex" data-default="ctrl+shift+a">
                 <div class="name">ShareX</div>
-                <div class="hotkey">Ctrl + Shift + A</div>
+                <div class="desc">开源截图录屏</div>
             </div>
-            <div class="tool-card" data-key="win+shift+s">
+            <div class="tool-card" data-tool="system" data-default="win+shift+s">
                 <div class="name">系统截图</div>
-                <div class="hotkey">Win + Shift + S</div>
+                <div class="desc">Windows 自带</div>
             </div>
         </div>
 
-        <div class="subtitle">快捷键不一样？手动输入：</div>
-        <div class="custom-row">
-            <input class="custom-input" id="customInput" placeholder="如 ctrl+alt+a 或 f3" />
-            <button class="btn" id="customSave">保存</button>
+        <div class="config-area" id="configArea">
+            <div class="config-label" id="configLabel">截图快捷键</div>
+            <div class="config-row">
+                <input class="hotkey-input" id="hotkeyInput" placeholder="填入你的截图快捷键" />
+                <button class="btn" id="saveBtn">保存</button>
+            </div>
+            <div class="hint">格式示例：ctrl+1、f1、ctrl+shift+a、win+shift+s</div>
         </div>
 
         <div class="status" id="statusMsg"></div>
@@ -121,34 +131,46 @@
         const executingPage = document.getElementById("executingPage");
         const statusMsg = document.getElementById("statusMsg");
         const execMsg = document.getElementById("execMsg");
-        const customInput = document.getElementById("customInput");
+        const configArea = document.getElementById("configArea");
+        const configLabel = document.getElementById("configLabel");
+        const hotkeyInput = document.getElementById("hotkeyInput");
 
-        // 高亮当前选中
-        function highlightActive(hotkey) {
-            document.querySelectorAll(".tool-card").forEach(card => {
-                card.classList.toggle("active", card.dataset.key === hotkey);
-            });
-        }
+        let selectedTool = "";
 
-        // 保存并提示
-        function saveAndNotify(hotkey) {
-            setConfig({ hotkey });
-            highlightActive(hotkey);
-            statusMsg.className = "status ok";
-            statusMsg.textContent = "✓ 已保存！现在可以使用「终端贴图」了";
-            setTimeout(() => utools.outPlugin(), 800);
-        }
-
-        // 预设卡片点击
+        // 选择工具卡片
         document.querySelectorAll(".tool-card").forEach(card => {
-            card.addEventListener("click", () => saveAndNotify(card.dataset.key));
+            card.addEventListener("click", () => {
+                selectedTool = card.dataset.tool;
+                // 高亮
+                document.querySelectorAll(".tool-card").forEach(c => c.classList.remove("active"));
+                card.classList.add("active");
+                // 显示配置区
+                configArea.classList.add("show");
+                configLabel.textContent = `${card.querySelector(".name").textContent} 截图快捷键`;
+                // 填入默认值（用户可修改）
+                const config = getConfig();
+                if (config && config.tool === selectedTool) {
+                    hotkeyInput.value = config.hotkey;
+                } else {
+                    hotkeyInput.value = card.dataset.default;
+                }
+                hotkeyInput.focus();
+                hotkeyInput.select();
+            });
         });
 
-        // 自定义保存
-        document.getElementById("customSave").addEventListener("click", () => {
-            const v = customInput.value.trim().toLowerCase();
-            if (!v) return;
-            saveAndNotify(v);
+        // 保存
+        document.getElementById("saveBtn").addEventListener("click", () => {
+            const hotkey = hotkeyInput.value.trim().toLowerCase();
+            if (!hotkey) {
+                statusMsg.className = "status err";
+                statusMsg.textContent = "请填入快捷键";
+                return;
+            }
+            setConfig({ tool: selectedTool, hotkey });
+            statusMsg.className = "status ok";
+            statusMsg.textContent = "✓ 已保存！";
+            setTimeout(() => utools.outPlugin(), 600);
         });
 
         // ===== 截图执行 =====
@@ -160,14 +182,11 @@
             const config = getConfig();
             if (!config || !config.hotkey) { showSetting(); return; }
 
-            execMsg.textContent = "正在调用截图...";
             utools.hideMainWindow();
             await new Promise(r => setTimeout(r, 300));
             simulateHotkey(config.hotkey);
 
-            execMsg.textContent = "等待截图完成...";
             const hasNew = await waitForNewImage(20000);
-
             if (!hasNew) {
                 utools.showNotification("截图超时或已取消");
                 utools.outPlugin();
@@ -181,9 +200,8 @@
                 return;
             }
 
-            const wslPath = toWslPath(winPath);
-            clipboard.writeText(wslPath);
-            utools.showNotification("已复制: " + wslPath);
+            clipboard.writeText(toWslPath(winPath));
+            utools.showNotification("已复制 WSL 路径");
             utools.outPlugin();
         }
 
@@ -191,9 +209,9 @@
             settingPage.style.display = "block";
             executingPage.style.display = "none";
             const config = getConfig();
-            if (config && config.hotkey) {
-                highlightActive(config.hotkey);
-                customInput.value = config.hotkey;
+            if (config && config.tool) {
+                const card = document.querySelector(`[data-tool="${config.tool}"]`);
+                if (card) card.click();
             }
         }
 
