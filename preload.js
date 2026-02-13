@@ -129,23 +129,22 @@ function simulateHotkey(hotkey) {
     } catch (_) {}
 }
 
-/** 等待剪贴板出现新图片 */
-function waitForNewImage(timeoutMs) {
+/** 清空剪贴板中的图片 */
+function clearClipboardImage() {
+    clipboard.writeText("");
+}
+
+/** 等待剪贴板出现图片（先清空再等，避免重复对比） */
+function waitForImage(timeoutMs) {
     return new Promise((resolve) => {
-        const oldImg = clipboard.readImage();
-        const oldData = oldImg.isEmpty() ? "" : oldImg.toDataURL().slice(0, 200);
         let elapsed = 0;
-        const interval = 300;
+        const interval = 150;
         const timer = setInterval(() => {
             elapsed += interval;
-            const cur = clipboard.readImage();
-            if (!cur.isEmpty()) {
-                const curData = cur.toDataURL().slice(0, 200);
-                if (curData !== oldData) {
-                    clearInterval(timer);
-                    resolve(true);
-                    return;
-                }
+            if (!clipboard.readImage().isEmpty()) {
+                clearInterval(timer);
+                resolve(true);
+                return;
             }
             if (elapsed >= timeoutMs) {
                 clearInterval(timer);
@@ -172,7 +171,8 @@ window.wslPaste = {
     getConfig,
     setConfig,
     simulateHotkey,
-    waitForNewImage,
+    clearClipboardImage,
+    waitForImage,
     saveClipboardImage,
     toWslPath,
     cleanOldFiles,

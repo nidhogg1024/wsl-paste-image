@@ -125,7 +125,7 @@
     </div>
 
     <script>
-        const { getConfig, setConfig, simulateHotkey, waitForNewImage, saveClipboardImage, toWslPath, cleanOldFiles, clipboard } = window.wslPaste;
+        const { getConfig, setConfig, simulateHotkey, clearClipboardImage, waitForImage, saveClipboardImage, toWslPath, cleanOldFiles, clipboard } = window.wslPaste;
 
         const settingPage = document.getElementById("settingPage");
         const executingPage = document.getElementById("executingPage");
@@ -175,24 +175,29 @@
 
         // ===== 截图执行 =====
         async function executeScreenshot() {
-            executingPage.style.display = "block";
-            settingPage.style.display = "none";
-            cleanOldFiles();
-
             const config = getConfig();
             if (!config || !config.hotkey) { showSetting(); return; }
 
+            // 立刻隐藏窗口，减少感知延迟
             utools.hideMainWindow();
-            await new Promise(r => setTimeout(r, 300));
+
+            // 清空剪贴板 + 清理旧文件（并行）
+            clearClipboardImage();
+            cleanOldFiles();
+
+            // 短暂等待窗口隐藏完成后模拟快捷键
+            await new Promise(r => setTimeout(r, 100));
             simulateHotkey(config.hotkey);
 
-            const hasNew = await waitForNewImage(20000);
+            // 等待截图完成（轻量轮询，150ms 间隔）
+            const hasNew = await waitForImage(20000);
             if (!hasNew) {
                 utools.showNotification("截图超时或已取消");
                 utools.outPlugin();
                 return;
             }
 
+            // 立即保存并转路径
             const winPath = saveClipboardImage();
             if (!winPath) {
                 utools.showNotification("剪贴板中没有图片");
