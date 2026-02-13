@@ -11,11 +11,15 @@ const CONFIG_KEY = "wsl_paste_config";
 // ===== 编译管理 =====
 
 function ensureExe() {
-    // 检查 exe 是否存在且比源码新
+    // 检查 exe 是否存在且比源码新（源码更新则重新编译）
     if (fs.existsSync(EXE_PATH)) {
-        const exeTime = fs.statSync(EXE_PATH).mtimeMs;
-        const srcTime = fs.statSync(SRC_PATH).mtimeMs;
-        if (exeTime > srcTime) return true;
+        try {
+            const exeTime = fs.statSync(EXE_PATH).mtimeMs;
+            const srcTime = fs.statSync(SRC_PATH).mtimeMs;
+            if (exeTime > srcTime) return true;
+            // 源码更新了，删除旧 exe
+            fs.unlinkSync(EXE_PATH);
+        } catch (_) {}
     }
 
     if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });

@@ -23,8 +23,12 @@ class WslPaste
     const int KEYEVENTF_KEYUP = 2;
     const int VK_ESCAPE = 0x1B;
 
+    [STAThread]
     static int Main(string[] args)
     {
+        // 强制 UTF-8 输出，避免中文乱码
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+
         if (args.Length == 0)
         {
             Console.Error.WriteLine("用法: WslPaste.exe <vk1 vk2 ...> 或 WslPaste.exe clipboard");
