@@ -169,10 +169,43 @@ function waitForNewImage(oldFingerprint, timeoutMs) {
 function getConfig() { return utools.dbStorage.getItem(CONFIG_KEY) || null; }
 function setConfig(config) { utools.dbStorage.setItem(CONFIG_KEY, config); }
 
-// ===== 暴露给页面 =====
+// ===== 在 preload 中拦截：已配置则直接执行，不等 HTML 加载 =====
+
+utools.onPluginEnter(async ({ code }) => {
+    if (code === "wsl-paste-setting") return; // 设置页走 HTML
+
+    const config = getConfig();
+    if (!config || !config.hotkey) return; // 未配置走 HTML 设置页
+
+    // 已配置：纯 preload 执行，HTML 不渲染
+    utools.hideMainWindow();
+    cleanOldFiles();
+
+    const oldFp = getClipboardFingerprint();
+    await new Promise(r => setTimeout(r, 50));
+    simulateHotkey(config.hotkey);
+
+    const result = await waitForNewImage(oldFp, 10000);
+    if (result !== "ok") {
+        utools.showNotification("截图超时或已取消");
+        utools.outPlugin();
+        return;
+    }
+
+    const wslPath = processClipboard();
+    if (!wslPath) {
+        utools.showNotification("剪贴板中没有图片");
+        utools.outPlugin();
+        return;
+    }
+
+    clipboard.writeText(wslPath);
+    utools.showNotification("已复制: " + wslPath);
+    utools.outPlugin();
+});
+
+// ===== 暴露给设置页 HTML =====
 
 window.wslPaste = {
-    getConfig, setConfig, simulateHotkey,
-    getClipboardFingerprint, waitForNewImage,
-    processClipboard, cleanOldFiles, clipboard,
+    getConfig, setConfig, clipboard,
 };

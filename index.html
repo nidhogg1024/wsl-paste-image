@@ -125,7 +125,7 @@
     </div>
 
     <script>
-        const { getConfig, setConfig, simulateHotkey, getClipboardFingerprint, waitForNewImage, processClipboard, cleanOldFiles, clipboard } = window.wslPaste;
+        const { getConfig, setConfig } = window.wslPaste;
 
         const settingPage = document.getElementById("settingPage");
         const executingPage = document.getElementById("executingPage");
@@ -173,42 +173,7 @@
             setTimeout(() => utools.outPlugin(), 600);
         });
 
-        async function executeScreenshot() {
-            const config = getConfig();
-            if (!config || !config.hotkey) {
-                showSetting();
-                statusMsg.className = "status";
-                statusMsg.textContent = "首次使用，请先选择截图工具并配置快捷键";
-                return;
-            }
-
-            // 立刻隐藏，不渲染任何内容
-            utools.hideMainWindow();
-            cleanOldFiles();
-
-            const oldFp = getClipboardFingerprint();
-            await new Promise(r => setTimeout(r, 50));
-            simulateHotkey(config.hotkey);
-
-            const result = await waitForNewImage(oldFp, 10000);
-            if (result !== "ok") {
-                utools.showNotification("截图超时或已取消");
-                utools.outPlugin();
-                return;
-            }
-
-            const wslPath = processClipboard();
-            if (!wslPath) {
-                utools.showNotification("剪贴板中没有图片");
-                utools.outPlugin();
-                return;
-            }
-
-            clipboard.writeText(wslPath);
-            utools.showNotification("已复制: " + wslPath);
-            utools.outPlugin();
-        }
-
+        // HTML 只处理设置页（已配置的截图在 preload.js 中拦截，不会到这里）
         function showSetting() {
             settingPage.style.display = "block";
             executingPage.style.display = "none";
@@ -217,15 +182,14 @@
                 const card = document.querySelector(`[data-tool="${config.tool}"]`);
                 if (card) card.click();
             }
+            statusMsg.className = "status";
+            const c = getConfig();
+            if (!c || !c.hotkey) {
+                statusMsg.textContent = "首次使用，请先选择截图工具并配置快捷键";
+            }
         }
 
-        utools.onPluginEnter(({ code }) => {
-            if (code === "wsl-paste-setting") {
-                showSetting();
-            } else {
-                executeScreenshot();
-            }
-        });
+        showSetting();
     </script>
 </body>
 </html>
