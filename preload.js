@@ -70,76 +70,93 @@ function processClipboard() {
     return `'${toWslPath(winPath)}'`;
 }
 
-// ===== 快捷键模拟（VBScript，极快） =====
+// ===== 快捷键模拟（编译 C# 小程序调用 keybd_event，首次编译后缓存） =====
 
-/**
- * 将 hotkey 字符串转为 VBScript SendKeys 格式
- * ctrl+shift+x → ^+x
- * ctrl+1 → ^1
- * f1 → {F1}
- * alt+a → %a
- */
-function toSendKeysFormat(hotkey) {
-    const parts = hotkey.toLowerCase().split("+").map(k => k.trim());
-    let prefix = "";
-    let key = "";
+const KEYSIM_DIR = path.join(os.tmpdir(), "wsl-paste-image");
+const KEYSIM_EXE = path.join(KEYSIM_DIR, "keysim.exe");
+const KEYSIM_SRC = path.join(KEYSIM_DIR, "keysim.cs");
 
-    for (const p of parts) {
-        if (p === "ctrl") prefix += "^";
-        else if (p === "shift") prefix += "+";
-        else if (p === "alt") prefix += "%";
-        else if (/^f(\d+)$/.test(p)) key = `{${p.toUpperCase()}}`;
-        else if (p === "esc") key = "{ESC}";
-        else if (p === "enter") key = "{ENTER}";
-        else if (p === "tab") key = "{TAB}";
-        else if (p === "space") key = " ";
-        else if (p === "delete") key = "{DEL}";
-        else key = p;
+const KEYSIM_CODE = `
+using System;
+using System.Runtime.InteropServices;
+using System.Threading;
+class K {
+    [DllImport("user32.dll")]
+    static extern void keybd_event(byte bVk, byte bScan, int dwFlags, int dwExtraInfo);
+    static void Main(string[] args) {
+        byte[] vks = new byte[args.Length];
+        for (int i = 0; i < args.Length; i++) vks[i] = byte.Parse(args[i]);
+        foreach (var vk in vks) keybd_event(vk, 0, 0, 0);
+        Thread.Sleep(50);
+        for (int i = vks.Length - 1; i >= 0; i--) keybd_event(vks[i], 0, 2, 0);
     }
+}
+`.trim();
 
-    return prefix + key;
+/** 确保 keysim.exe 存在（首次编译，后续直接用缓存） */
+function ensureKeysimExe() {
+    if (fs.existsSync(KEYSIM_EXE)) return true;
+    ensureTempDir();
+    fs.writeFileSync(KEYSIM_SRC, KEYSIM_CODE);
+    // 查找 csc.exe（.NET Framework 自带，Windows 都有）
+    const fwDir = "C:\\Windows\\Microsoft.NET\\Framework64\\";
+    let csc = "";
+    try {
+        const dirs = fs.readdirSync(fwDir).filter(d => d.startsWith("v")).sort().reverse();
+        for (const d of dirs) {
+            const p = path.join(fwDir, d, "csc.exe");
+            if (fs.existsSync(p)) { csc = p; break; }
+        }
+    } catch (_) {}
+    if (!csc) {
+        // 尝试 32 位
+        const fwDir32 = "C:\\Windows\\Microsoft.NET\\Framework\\";
+        try {
+            const dirs = fs.readdirSync(fwDir32).filter(d => d.startsWith("v")).sort().reverse();
+            for (const d of dirs) {
+                const p = path.join(fwDir32, d, "csc.exe");
+                if (fs.existsSync(p)) { csc = p; break; }
+            }
+        } catch (_) {}
+    }
+    if (!csc) return false;
+    try {
+        execSync(`"${csc}" /nologo /out:"${KEYSIM_EXE}" "${KEYSIM_SRC}"`, { windowsHide: true, timeout: 10000 });
+        return fs.existsSync(KEYSIM_EXE);
+    } catch (_) { return false; }
 }
 
 function simulateHotkey(hotkey) {
     const parts = hotkey.toLowerCase().split("+").map(k => k.trim());
 
-    // Win 组合键特殊处理
-    if (parts.includes("win")) {
-        if (parts.includes("shift") && parts.includes("s")) {
-            // Win+Shift+S → 系统截图，用协议调起（最快）
-            try { execSync("start ms-screenclip:", { shell: true, windowsHide: true, timeout: 2000 }); } catch (_) {}
-            return;
-        }
-        // 其他 Win 组合键用 PowerShell（不常见，可接受慢一点）
-        const vkCodes = [];
-        const vkMap = { "win": 0x5B, "ctrl": 0x11, "shift": 0x10, "alt": 0x12 };
-        for (const p of parts) {
-            if (vkMap[p]) vkCodes.push(vkMap[p]);
-            else if (p.length === 1) vkCodes.push(p.toUpperCase().charCodeAt(0));
-            else if (/^f(\d+)$/.test(p)) vkCodes.push(0x6F + parseInt(p.slice(1)));
-        }
-        const lines = [
-            'Add-Type -TypeDefinition @"',
-            'using System;using System.Runtime.InteropServices;',
-            'public class K{[DllImport("user32.dll")]public static extern void keybd_event(byte a,byte b,int c,int d);}',
-            '"@',
-            ...vkCodes.map(v => `[K]::keybd_event(${v},0,0,0)`),
-            'Start-Sleep -m 50',
-            ...vkCodes.reverse().map(v => `[K]::keybd_event(${v},0,2,0)`),
-        ];
-        const enc = Buffer.from(lines.join("\r\n"), "utf16le").toString("base64");
-        try { execSync(`powershell -NoProfile -EncodedCommand ${enc}`, { windowsHide: true, timeout: 5000 }); } catch (_) {}
+    // Win+Shift+S 特殊处理
+    if (parts.includes("win") && parts.includes("shift") && parts.includes("s")) {
+        try { execSync("start ms-screenclip:", { shell: true, windowsHide: true, timeout: 2000 }); } catch (_) {}
         return;
     }
 
-    // 非 Win 组合键：用 VBScript（mshta 内联，<50ms）
-    const sendKeys = toSendKeysFormat(hotkey);
-    const vbs = `CreateObject("WScript.Shell").SendKeys "${sendKeys}"`;
-    try {
-        execSync(`mshta vbscript:Execute("${vbs.replace(/"/g, '""')}:Close")`, {
-            windowsHide: true, timeout: 2000,
-        });
-    } catch (_) {}
+    const vkMap = {
+        "win": 0x5B, "ctrl": 0x11, "shift": 0x10, "alt": 0x12,
+        "tab": 0x09, "enter": 0x0D, "space": 0x20, "esc": 0x1B,
+        "backspace": 0x08, "delete": 0x2E,
+        "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27,
+        "printscreen": 0x2C, "prtsc": 0x2C,
+    };
+
+    const vkCodes = [];
+    for (const p of parts) {
+        if (vkMap[p] !== undefined) vkCodes.push(vkMap[p]);
+        else if (p.length === 1) vkCodes.push(p.toUpperCase().charCodeAt(0));
+        else if (/^f(\d+)$/.test(p)) vkCodes.push(0x6F + parseInt(p.slice(1)));
+    }
+    if (vkCodes.length === 0) return;
+
+    if (ensureKeysimExe()) {
+        // 用编译好的 keysim.exe（<10ms）
+        try {
+            execSync(`"${KEYSIM_EXE}" ${vkCodes.join(" ")}`, { windowsHide: true, timeout: 2000 });
+        } catch (_) {}
+    }
 }
 
 // ===== 等待截图 =====
