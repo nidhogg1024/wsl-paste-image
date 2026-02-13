@@ -190,7 +190,7 @@
             simulateHotkey(config.hotkey);
 
             // 等待剪贴板变化（图片尺寸指纹比对，轻量）
-            const hasNew = await waitForNewImage(oldFp, 20000);
+            const hasNew = await waitForNewImage(oldFp, 10000);
             if (!hasNew) {
                 utools.showNotification("截图超时或已取消");
                 utools.outPlugin();

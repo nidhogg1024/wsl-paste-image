@@ -138,38 +138,46 @@ const { execSync } = require("child_process");
 function simulateHotkey(hotkey) {
     const parts = hotkey.toLowerCase().split("+").map(k => k.trim());
 
-    // 收集虚拟键码
-    const vkCodes = [];
     const vkMap = {
-        "win": "0x5B", "ctrl": "0x11", "shift": "0x10", "alt": "0x12",
-        "tab": "0x09", "enter": "0x0D", "space": "0x20", "esc": "0x1B",
-        "backspace": "0x08", "delete": "0x2E", "insert": "0x2D",
-        "up": "0x26", "down": "0x28", "left": "0x25", "right": "0x27",
-        "printscreen": "0x2C", "prtsc": "0x2C",
+        "win": 0x5B, "ctrl": 0x11, "shift": 0x10, "alt": 0x12,
+        "tab": 0x09, "enter": 0x0D, "space": 0x20, "esc": 0x1B,
+        "backspace": 0x08, "delete": 0x2E, "insert": 0x2D,
+        "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27,
+        "printscreen": 0x2C, "prtsc": 0x2C,
     };
 
+    const vkCodes = [];
     for (const p of parts) {
-        if (vkMap[p]) {
+        if (vkMap[p] !== undefined) {
             vkCodes.push(vkMap[p]);
         } else if (p.length === 1) {
-            // 字母或数字
-            vkCodes.push(`0x${p.toUpperCase().charCodeAt(0).toString(16)}`);
+            vkCodes.push(p.toUpperCase().charCodeAt(0));
         } else if (/^f(\d+)$/.test(p)) {
-            // F1-F24
-            vkCodes.push(`0x${(0x6F + parseInt(p.slice(1))).toString(16)}`);
-        } else if (/^\d$/.test(p)) {
-            vkCodes.push(`0x${(0x30 + parseInt(p)).toString(16)}`);
+            vkCodes.push(0x6F + parseInt(p.slice(1)));
         }
     }
-
     if (vkCodes.length === 0) return;
 
-    const downCmds = vkCodes.map(vk => `[W]::keybd_event(${vk},0,0,0)`).join(";");
-    const upCmds = vkCodes.slice().reverse().map(vk => `[W]::keybd_event(${vk},0,2,0)`).join(";");
-    const ps = `Add-Type 'using System;using System.Runtime.InteropServices;public class W{[DllImport("user32.dll")]public static extern void keybd_event(byte a,byte b,int c,int d);}';${downCmds};Start-Sleep -m 50;${upCmds}`;
+    // 构建 PowerShell 脚本，用 -EncodedCommand 避免引号问题
+    const lines = [
+        'Add-Type -TypeDefinition @"',
+        'using System;',
+        'using System.Runtime.InteropServices;',
+        'public class KeySim {',
+        '  [DllImport("user32.dll")]',
+        '  public static extern void keybd_event(byte bVk, byte bScan, int dwFlags, int dwExtraInfo);',
+        '}',
+        '"@',
+        ...vkCodes.map(vk => `[KeySim]::keybd_event(${vk}, 0, 0, 0)`),
+        'Start-Sleep -Milliseconds 50',
+        ...vkCodes.slice().reverse().map(vk => `[KeySim]::keybd_event(${vk}, 0, 2, 0)`),
+    ];
+    const script = lines.join("\r\n");
+    // Base64 编码（UTF-16LE，PowerShell 要求）
+    const encoded = Buffer.from(script, "utf16le").toString("base64");
 
     try {
-        execSync(`powershell -NoProfile -Command "${ps}"`, { windowsHide: true, timeout: 5000 });
+        execSync(`powershell -NoProfile -EncodedCommand ${encoded}`, { windowsHide: true, timeout: 5000 });
     } catch (_) {}
 }
 
