@@ -125,7 +125,7 @@
     </div>
 
     <script>
-        const { getConfig, setConfig, simulateHotkey, clearClipboardImage, waitForImage, saveClipboardImage, toWslPath, cleanOldFiles, clipboard } = window.wslPaste;
+        const { getConfig, setConfig, simulateHotkey, getClipboardFingerprint, waitForNewImage, processClipboard, cleanOldFiles, clipboard } = window.wslPaste;
 
         const settingPage = document.getElementById("settingPage");
         const executingPage = document.getElementById("executingPage");
@@ -178,35 +178,35 @@
             const config = getConfig();
             if (!config || !config.hotkey) { showSetting(); return; }
 
-            // 立刻隐藏窗口，减少感知延迟
+            // 立刻隐藏窗口
             utools.hideMainWindow();
-
-            // 清空剪贴板 + 清理旧文件（并行）
-            clearClipboardImage();
             cleanOldFiles();
 
-            // 短暂等待窗口隐藏完成后模拟快捷键
+            // 记录截图前剪贴板指纹（用于检测变化，不清空剪贴板）
+            const oldFp = getClipboardFingerprint();
+
+            // 等窗口隐藏后模拟快捷键
             await new Promise(r => setTimeout(r, 100));
             simulateHotkey(config.hotkey);
 
-            // 等待截图完成（轻量轮询，150ms 间隔）
-            const hasNew = await waitForImage(20000);
+            // 等待剪贴板变化（图片尺寸指纹比对，轻量）
+            const hasNew = await waitForNewImage(oldFp, 20000);
             if (!hasNew) {
                 utools.showNotification("截图超时或已取消");
                 utools.outPlugin();
                 return;
             }
 
-            // 立即保存并转路径
-            const winPath = saveClipboardImage();
-            if (!winPath) {
+            // 读取剪贴板（带重试）→ 保存 → 转路径（带单引号）
+            const wslPath = processClipboard();
+            if (!wslPath) {
                 utools.showNotification("剪贴板中没有图片");
                 utools.outPlugin();
                 return;
             }
 
-            clipboard.writeText(toWslPath(winPath));
-            utools.showNotification("已复制 WSL 路径");
+            clipboard.writeText(wslPath);
+            utools.showNotification("已复制: " + wslPath);
             utools.outPlugin();
         }
 
