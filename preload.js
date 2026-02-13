@@ -97,23 +97,60 @@ function processClipboard() {
 }
 
 /**
- * 等待剪贴板出现新图片（通过尺寸指纹比对，轻量）
+ * 检测 Esc 键是否被按下（通过 GetAsyncKeyState）
+ */
+function isEscPressed() {
+    try {
+        const result = execSync(
+            'powershell -NoProfile -Command "[Console]::Write([System.Windows.Forms.Control]::ModifierKeys -eq \'None\' -and [System.Windows.Forms.NativeWindow]); Add-Type -AssemblyName System.Windows.Forms; [Console]::Write(([System.Windows.Forms.Form+NativeMethods]::GetAsyncKeyState(0x1B) -band 0x8000) -ne 0)"',
+            { windowsHide: true, timeout: 500, encoding: "utf-8" }
+        ).trim();
+        return result === "True";
+    } catch (_) {
+        // 备选：直接用简短的 C# 调用
+        try {
+            const ps = Buffer.from(
+                'Add-Type -MemberDefinition \'[DllImport("user32.dll")]public static extern short GetAsyncKeyState(int vKey);\' -Name K -Namespace W;if(([W.K]::GetAsyncKeyState(0x1B) -band 0x8000) -ne 0){Write-Output 1}else{Write-Output 0}',
+                "utf16le"
+            ).toString("base64");
+            const r = execSync(`powershell -NoProfile -EncodedCommand ${ps}`, {
+                windowsHide: true, timeout: 500, encoding: "utf-8"
+            }).trim();
+            return r === "1";
+        } catch (_) {
+            return false;
+        }
+    }
+}
+
+/**
+ * 等待剪贴板出现新图片（通过尺寸指纹比对）
+ * 同时监听 Esc 键，按下则立即取消
  */
 function waitForNewImage(oldFingerprint, timeoutMs) {
     return new Promise((resolve) => {
         let elapsed = 0;
-        const interval = 150;
+        const interval = 200;
         const timer = setInterval(() => {
             elapsed += interval;
+            // 检测剪贴板变化
             const cur = getClipboardFingerprint();
             if (cur !== "empty" && cur !== oldFingerprint) {
                 clearInterval(timer);
-                resolve(true);
+                resolve("ok");
                 return;
+            }
+            // 每 600ms 检测一次 Esc（PowerShell 调用有开销，不要太频繁）
+            if (elapsed % 600 < interval) {
+                if (isEscPressed()) {
+                    clearInterval(timer);
+                    resolve("cancelled");
+                    return;
+                }
             }
             if (elapsed >= timeoutMs) {
                 clearInterval(timer);
-                resolve(false);
+                resolve("timeout");
             }
         }, interval);
     });

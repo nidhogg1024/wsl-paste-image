@@ -189,10 +189,15 @@
             await new Promise(r => setTimeout(r, 100));
             simulateHotkey(config.hotkey);
 
-            // 等待剪贴板变化（图片尺寸指纹比对，轻量）
-            const hasNew = await waitForNewImage(oldFp, 10000);
-            if (!hasNew) {
-                utools.showNotification("截图超时或已取消");
+            // 等待剪贴板变化，同时监听 Esc 取消
+            const result = await waitForNewImage(oldFp, 10000);
+            if (result === "cancelled") {
+                utools.showNotification("已取消");
+                utools.outPlugin();
+                return;
+            }
+            if (result === "timeout") {
+                utools.showNotification("截图超时");
                 utools.outPlugin();
                 return;
             }
