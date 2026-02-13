@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            user-select: none;
+        }
+        h2 { font-size: 16px; margin-bottom: 16px; color: #fff; }
+        .setting-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        .setting-label {
+            font-size: 13px;
+            color: #aaa;
+            min-width: 100px;
+        }
+        .hotkey-input {
+            background: #2d2d2d;
+            border: 1px solid #404040;
+            border-radius: 4px;
+            padding: 8px 12px;
+            color: #4ec9b0;
+            font-family: monospace;
+            font-size: 14px;
+            outline: none;
+            flex: 1;
+            max-width: 260px;
+        }
+        .hotkey-input:focus { border-color: #4ec9b0; }
+        .hotkey-input::placeholder { color: #555; }
+        .btn {
+            background: #0e639c;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            padding: 8px 20px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .btn:hover { background: #1177bb; }
+        .hint { font-size: 12px; color: #666; margin-top: 8px; line-height: 1.6; }
+        .presets { margin-top: 12px; }
+        .preset-btn {
+            background: #2d2d2d;
+            border: 1px solid #404040;
+            border-radius: 4px;
+            padding: 4px 12px;
+            color: #d4d4d4;
+            font-size: 12px;
+            cursor: pointer;
+            margin-right: 8px;
+            margin-bottom: 6px;
+            display: inline-block;
+        }
+        .preset-btn:hover { border-color: #4ec9b0; color: #4ec9b0; }
+        .status { margin-top: 16px; font-size: 13px; }
+        .status.ok { color: #6a9955; }
+        .status.err { color: #f14c4c; }
+
+        /* 执行中状态 */
+        .executing {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 80vh;
+        }
+        .executing .spinner {
+            width: 32px; height: 32px;
+            border: 3px solid #333;
+            border-top: 3px solid #4ec9b0;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .executing .msg { margin-top: 12px; color: #aaa; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <!-- 设置页面 -->
+    <div id="settingPage" style="display:none;">
+        <h2>终端贴图助手 - 设置</h2>
+        <div class="setting-row">
+            <span class="setting-label">截图快捷键</span>
+            <input class="hotkey-input" id="hotkeyInput" placeholder="按下快捷键组合..." readonly />
+            <button class="btn" id="saveBtn">保存</button>
+        </div>
+        <div class="hint">
+            点击输入框后按下你的截图工具快捷键（如 PixPin 默认 Ctrl+Shift+X）
+        </div>
+        <div class="presets">
+            <span style="font-size: 12px; color: #888;">快捷预设：</span>
+            <span class="preset-btn" data-key="ctrl+shift+x">PixPin (Ctrl+Shift+X)</span>
+            <span class="preset-btn" data-key="f1">Snipaste (F1)</span>
+            <span class="preset-btn" data-key="ctrl+shift+a">ShareX (Ctrl+Shift+A)</span>
+            <span class="preset-btn" data-key="win+shift+s">系统截图 (Win+Shift+S)</span>
+        </div>
+        <div class="status" id="statusMsg"></div>
+    </div>
+
+    <!-- 执行中页面 -->
+    <div id="executingPage" style="display:none;">
+        <div class="executing">
+            <div class="spinner"></div>
+            <div class="msg" id="execMsg">正在截图...</div>
+        </div>
+    </div>
+
+    <script>
+        const { getConfig, setConfig, simulateHotkey, waitForNewImage, saveClipboardImage, toWslPath, cleanOldFiles, clipboard } = window.wslPaste;
+
+        const settingPage = document.getElementById("settingPage");
+        const executingPage = document.getElementById("executingPage");
+        const hotkeyInput = document.getElementById("hotkeyInput");
+        const saveBtn = document.getElementById("saveBtn");
+        const statusMsg = document.getElementById("statusMsg");
+        const execMsg = document.getElementById("execMsg");
+
+        // ===== 快捷键录入 =====
+        let currentHotkey = "";
+
+        hotkeyInput.addEventListener("keydown", (e) => {
+            e.preventDefault();
+            const parts = [];
+            if (e.ctrlKey) parts.push("Ctrl");
+            if (e.shiftKey) parts.push("Shift");
+            if (e.altKey) parts.push("Alt");
+            if (e.metaKey) parts.push("Win");
+
+            const key = e.key;
+            if (!["Control", "Shift", "Alt", "Meta"].includes(key)) {
+                if (key.length === 1) {
+                    parts.push(key.toUpperCase());
+                } else {
+                    parts.push(key);
+                }
+            }
+
+            if (parts.length > 0) {
+                currentHotkey = parts.join("+").toLowerCase();
+                hotkeyInput.value = parts.join(" + ");
+            }
+        });
+
+        // 预设按钮
+        document.querySelectorAll(".preset-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+                currentHotkey = btn.dataset.key;
+                hotkeyInput.value = currentHotkey.replace(/\+/g, " + ").replace(/ctrl/i, "Ctrl").replace(/shift/i, "Shift").replace(/alt/i, "Alt").replace(/win/i, "Win");
+            });
+        });
+
+        // 保存
+        saveBtn.addEventListener("click", () => {
+            if (!currentHotkey) {
+                statusMsg.className = "status err";
+                statusMsg.textContent = "请先设置快捷键";
+                return;
+            }
+            setConfig({ hotkey: currentHotkey });
+            statusMsg.className = "status ok";
+            statusMsg.textContent = "✓ 已保存！现在可以使用「终端贴图」功能了";
+            setTimeout(() => utools.outPlugin(), 1000);
+        });
+
+        // ===== 截图执行流程 =====
+        async function executeScreenshot() {
+            executingPage.style.display = "block";
+            settingPage.style.display = "none";
+            cleanOldFiles();
+
+            const config = getConfig();
+            if (!config || !config.hotkey) {
+                // 未配置，跳到设置页
+                showSetting();
+                return;
+            }
+
+            // 1. 模拟截图快捷键
+            execMsg.textContent = "正在调用截图...";
+            // 先最小化 uTools 窗口，避免截到自己
+            utools.hideMainWindow();
+            await new Promise(r => setTimeout(r, 300));
+            simulateHotkey(config.hotkey);
+
+            // 2. 等待截图完成
+            execMsg.textContent = "等待截图完成...";
+            const hasNew = await waitForNewImage(20000);
+
+            if (!hasNew) {
+                utools.showNotification("截图超时或已取消");
+                utools.outPlugin();
+                return;
+            }
+
+            // 3. 保存 + 转路径
+            const winPath = saveClipboardImage();
+            if (!winPath) {
+                utools.showNotification("剪贴板中没有图片");
+                utools.outPlugin();
+                return;
+            }
+
+            const wslPath = toWslPath(winPath);
+            clipboard.writeText(wslPath);
+            utools.showNotification("已复制: " + wslPath);
+            utools.outPlugin();
+        }
+
+        function showSetting() {
+            settingPage.style.display = "block";
+            executingPage.style.display = "none";
+            const config = getConfig();
+            if (config && config.hotkey) {
+                currentHotkey = config.hotkey;
+                hotkeyInput.value = config.hotkey.replace(/\+/g, " + ");
+            }
+        }
+
+        // ===== uTools 入口 =====
+        utools.onPluginEnter(({ code }) => {
+            if (code === "wsl-paste-setting") {
+                showSetting();
+            } else if (code === "wsl-paste") {
+                const config = getConfig();
+                if (!config || !config.hotkey) {
+                    // 首次使用，先配置
+                    showSetting();
+                    statusMsg.className = "status";
+                    statusMsg.textContent = "首次使用，请先配置截图快捷键";
+                } else {
+                    executeScreenshot();
+                }
+            }
+        });
+    </script>
+</body>
+</html>
