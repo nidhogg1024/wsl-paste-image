@@ -91,11 +91,11 @@
         <h2>终端贴图助手 - 设置</h2>
         <div class="setting-row">
             <span class="setting-label">截图快捷键</span>
-            <input class="hotkey-input" id="hotkeyInput" placeholder="按下快捷键组合..." readonly />
+            <input class="hotkey-input" id="hotkeyInput" placeholder="如 ctrl+shift+x" />
             <button class="btn" id="saveBtn">保存</button>
         </div>
         <div class="hint">
-            点击输入框后按下你的截图工具快捷键（如 PixPin 默认 Ctrl+Shift+X）
+            点击下方预设按钮，或手动输入快捷键（格式如 ctrl+shift+x）
         </div>
         <div class="presets">
             <span style="font-size: 12px; color: #888;">快捷预设：</span>
@@ -125,31 +125,7 @@
         const statusMsg = document.getElementById("statusMsg");
         const execMsg = document.getElementById("execMsg");
 
-        // ===== 快捷键录入 =====
         let currentHotkey = "";
-
-        hotkeyInput.addEventListener("keydown", (e) => {
-            e.preventDefault();
-            const parts = [];
-            if (e.ctrlKey) parts.push("Ctrl");
-            if (e.shiftKey) parts.push("Shift");
-            if (e.altKey) parts.push("Alt");
-            if (e.metaKey) parts.push("Win");
-
-            const key = e.key;
-            if (!["Control", "Shift", "Alt", "Meta"].includes(key)) {
-                if (key.length === 1) {
-                    parts.push(key.toUpperCase());
-                } else {
-                    parts.push(key);
-                }
-            }
-
-            if (parts.length > 0) {
-                currentHotkey = parts.join("+").toLowerCase();
-                hotkeyInput.value = parts.join(" + ");
-            }
-        });
 
         // 预设按钮
         document.querySelectorAll(".preset-btn").forEach(btn => {
@@ -161,12 +137,15 @@
 
         // 保存
         saveBtn.addEventListener("click", () => {
-            if (!currentHotkey) {
+            // 优先用 currentHotkey（预设），否则读输入框
+            const hotkey = currentHotkey || hotkeyInput.value.trim().toLowerCase();
+            if (!hotkey) {
                 statusMsg.className = "status err";
                 statusMsg.textContent = "请先设置快捷键";
                 return;
             }
-            setConfig({ hotkey: currentHotkey });
+            currentHotkey = hotkey;
+            setConfig({ hotkey });
             statusMsg.className = "status ok";
             statusMsg.textContent = "✓ 已保存！现在可以使用「终端贴图」功能了";
             setTimeout(() => utools.outPlugin(), 1000);
