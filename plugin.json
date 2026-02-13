@@ -4,7 +4,6 @@
     "author": "nidhogg1024",
     "homepage": "https://github.com/nidhogg1024/wsl-paste-image",
     "preload": "preload.js",
-    "main": "index.html",
     "logo": "logo.png",
     "version": "1.0.0",
     "pluginSetting": {
@@ -19,17 +18,18 @@
                 "截图转路径",
                 "WSL 贴图",
                 "wsl paste",
-                "screenshot to path",
                 "贴图"
-            ]
+            ],
+            "mode": "none"
         },
         {
             "code": "wsl-paste-setting",
-            "explain": "终端贴图助手 - 设置",
+            "explain": "终端贴图助手 - 设置截图快捷键",
             "cmds": [
                 "终端贴图设置",
                 "wsl paste setting"
-            ]
+            ],
+            "main": "setting.html"
         }
     ]
 }

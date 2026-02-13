@@ -125,7 +125,7 @@
     </div>
 
     <script>
-        const { getConfig, setConfig, simulateHotkey, getClipboardFingerprint, waitForNewImage, processClipboard, cleanOldFiles, clipboard } = window.wslPaste;
+        const { getConfig, setConfig } = window.wslPaste;
 
         const settingPage = document.getElementById("settingPage");
         const executingPage = document.getElementById("executingPage");
@@ -173,43 +173,6 @@
             setTimeout(() => utools.outPlugin(), 600);
         });
 
-        // ===== 截图执行 =====
-        async function executeScreenshot() {
-            const config = getConfig();
-            if (!config || !config.hotkey) { showSetting(); return; }
-
-            // 立刻隐藏窗口
-            utools.hideMainWindow();
-            cleanOldFiles();
-
-            // 记录截图前剪贴板指纹（用于检测变化，不清空剪贴板）
-            const oldFp = getClipboardFingerprint();
-
-            // 等窗口隐藏后模拟快捷键
-            await new Promise(r => setTimeout(r, 100));
-            simulateHotkey(config.hotkey);
-
-            // 等待剪贴板变化（纯 JS 轮询，无外部调用，极快）
-            const result = await waitForNewImage(oldFp, 10000);
-            if (result !== "ok") {
-                utools.showNotification("截图超时或已取消");
-                utools.outPlugin();
-                return;
-            }
-
-            // 读取剪贴板（带重试）→ 保存 → 转路径（带单引号）
-            const wslPath = processClipboard();
-            if (!wslPath) {
-                utools.showNotification("剪贴板中没有图片");
-                utools.outPlugin();
-                return;
-            }
-
-            clipboard.writeText(wslPath);
-            utools.showNotification("已复制: " + wslPath);
-            utools.outPlugin();
-        }
-
         function showSetting() {
             settingPage.style.display = "block";
             executingPage.style.display = "none";
@@ -220,19 +183,7 @@
             }
         }
 
-        // ===== uTools 入口 =====
-        utools.onPluginEnter(({ code }) => {
-            if (code === "wsl-paste-setting") {
-                showSetting();
-            } else if (code === "wsl-paste") {
-                const config = getConfig();
-                if (!config || !config.hotkey) {
-                    showSetting();
-                } else {
-                    executeScreenshot();
-                }
-            }
-        });
+        utools.onPluginEnter(() => { showSetting(); });
     </script>
 </body>
 </html>

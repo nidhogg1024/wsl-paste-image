@@ -169,10 +169,58 @@ function waitForNewImage(oldFingerprint, timeoutMs) {
 function getConfig() { return utools.dbStorage.getItem(CONFIG_KEY) || null; }
 function setConfig(config) { utools.dbStorage.setItem(CONFIG_KEY, config); }
 
-// ===== 暴露 =====
+// ===== 暴露给设置页 =====
 
 window.wslPaste = {
-    getConfig, setConfig, simulateHotkey,
-    getClipboardFingerprint, waitForNewImage,
-    processClipboard, cleanOldFiles, clipboard,
+    getConfig, setConfig, clipboard,
+};
+
+// ===== mode: "none" 截图功能（不加载 HTML，直接执行） =====
+
+window.exports = {
+    "wsl-paste": {
+        mode: "none",
+        args: {
+            enter: async () => {
+                const config = getConfig();
+                if (!config || !config.hotkey) {
+                    utools.showNotification("请先设置截图快捷键：搜索「终端贴图设置」");
+                    utools.outPlugin();
+                    return;
+                }
+
+                cleanOldFiles();
+
+                // 记录截图前剪贴板指纹
+                const oldFp = getClipboardFingerprint();
+
+                // 隐藏 uTools 窗口
+                utools.hideMainWindow();
+
+                // 极短等待后模拟快捷键（VBScript，<50ms）
+                await new Promise(r => setTimeout(r, 50));
+                simulateHotkey(config.hotkey);
+
+                // 等待剪贴板变化（纯 JS 轮询）
+                const result = await waitForNewImage(oldFp, 10000);
+                if (result !== "ok") {
+                    utools.showNotification("截图超时或已取消");
+                    utools.outPlugin();
+                    return;
+                }
+
+                // 处理剪贴板
+                const wslPath = processClipboard();
+                if (!wslPath) {
+                    utools.showNotification("剪贴板中没有图片");
+                    utools.outPlugin();
+                    return;
+                }
+
+                clipboard.writeText(wslPath);
+                utools.showNotification("已复制: " + wslPath);
+                utools.outPlugin();
+            },
+        },
+    },
 };
