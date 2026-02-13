@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            user-select: none;
+        }
+        .status {
+            font-size: 14px;
+            color: #888;
+            margin-bottom: 16px;
+        }
+        .tool-info {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 20px;
+        }
+        .result-area {
+            width: 100%;
+            max-width: 600px;
+        }
+        .path-display {
+            background: #2d2d2d;
+            border: 1px solid #404040;
+            border-radius: 6px;
+            padding: 12px 16px;
+            font-family: "Cascadia Code", "Fira Code", monospace;
+            font-size: 13px;
+            color: #4ec9b0;
+            word-break: break-all;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+        .path-display:hover {
+            border-color: #4ec9b0;
+        }
+        .path-display.copied {
+            border-color: #6a9955;
+        }
+        .hint {
+            font-size: 12px;
+            color: #666;
+            margin-top: 8px;
+            text-align: center;
+        }
+        .btn {
+            background: #0e639c;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            padding: 8px 20px;
+            font-size: 13px;
+            cursor: pointer;
+            margin: 6px;
+            transition: background 0.2s;
+        }
+        .btn:hover { background: #1177bb; }
+        .btn:active { background: #0d5689; }
+        .btn-group {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 16px;
+        }
+        .preview {
+            margin-top: 12px;
+            text-align: center;
+        }
+        .preview img {
+            max-width: 100%;
+            max-height: 200px;
+            border-radius: 4px;
+            border: 1px solid #404040;
+        }
+        .error {
+            color: #f14c4c;
+            font-size: 13px;
+            margin-top: 8px;
+            text-align: center;
+        }
+        .success {
+            color: #6a9955;
+            font-size: 13px;
+            margin-top: 8px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="status" id="status">准备就绪</div>
+    <div class="tool-info" id="toolInfo"></div>
+
+    <div class="btn-group">
+        <button class="btn" id="btnScreenshot">📷 截图</button>
+        <button class="btn" id="btnClipboard">📋 读取剪贴板</button>
+    </div>
+
+    <div class="result-area">
+        <div class="path-display" id="pathDisplay" style="display:none;" title="点击复制"></div>
+        <div class="hint" id="hint" style="display:none;">点击路径复制 → 到 WSL 终端 Ctrl+V 粘贴</div>
+        <div class="preview" id="preview"></div>
+        <div id="message"></div>
+    </div>
+
+    <script>
+        const { takeScreenshot, saveClipboardImage, windowsToWslPath, cleanOldFiles, detectScreenshotTool, clipboard } = window.wslPaste;
+
+        const statusEl = document.getElementById("status");
+        const toolInfoEl = document.getElementById("toolInfo");
+        const pathDisplayEl = document.getElementById("pathDisplay");
+        const hintEl = document.getElementById("hint");
+        const previewEl = document.getElementById("preview");
+        const messageEl = document.getElementById("message");
+
+        // 显示检测到的截图工具
+        const tool = detectScreenshotTool();
+        toolInfoEl.textContent = tool
+            ? `检测到截图工具: ${tool.name}`
+            : "未检测到第三方截图工具，将使用系统截图";
+
+        // 启动时清理旧文件
+        cleanOldFiles();
+
+        // 处理剪贴板图片 → 保存 → 转路径 → 复制
+        function processClipboard() {
+            const filePath = saveClipboardImage();
+            if (!filePath) {
+                messageEl.innerHTML = '<div class="error">剪贴板中没有图片</div>';
+                return;
+            }
+
+            const wslPath = windowsToWslPath(filePath);
+
+            // 将 WSL 路径写入剪贴板
+            clipboard.writeText(wslPath);
+
+            // 显示结果
+            pathDisplayEl.textContent = wslPath;
+            pathDisplayEl.style.display = "block";
+            hintEl.style.display = "block";
+            messageEl.innerHTML = '<div class="success">✓ WSL 路径已复制到剪贴板</div>';
+            statusEl.textContent = "完成！Ctrl+V 粘贴到 WSL 终端";
+
+            // 显示预览
+            previewEl.innerHTML = `<img src="file://${filePath}" alt="截图预览">`;
+
+            // 点击路径再次复制
+            pathDisplayEl.onclick = () => {
+                clipboard.writeText(wslPath);
+                pathDisplayEl.classList.add("copied");
+                messageEl.innerHTML = '<div class="success">✓ 已复制</div>';
+                setTimeout(() => pathDisplayEl.classList.remove("copied"), 1000);
+            };
+        }
+
+        // 截图按钮
+        document.getElementById("btnScreenshot").addEventListener("click", async () => {
+            statusEl.textContent = "正在启动截图工具...";
+            messageEl.innerHTML = "";
+
+            await takeScreenshot();
+
+            // 轮询剪贴板等待截图完成（最多等 30 秒）
+            statusEl.textContent = "等待截图完成...";
+            let attempts = 0;
+            const maxAttempts = 60;
+            const checkInterval = setInterval(() => {
+                attempts++;
+                const img = clipboard.readImage();
+                if (!img.isEmpty()) {
+                    clearInterval(checkInterval);
+                    processClipboard();
+                } else if (attempts >= maxAttempts) {
+                    clearInterval(checkInterval);
+                    statusEl.textContent = "截图超时";
+                    messageEl.innerHTML = '<div class="error">等待截图超时，请重试</div>';
+                }
+            }, 500);
+        });
+
+        // 读取剪贴板按钮
+        document.getElementById("btnClipboard").addEventListener("click", () => {
+            statusEl.textContent = "读取剪贴板...";
+            messageEl.innerHTML = "";
+            processClipboard();
+        });
+
+        // uTools 入口处理
+        utools.onPluginEnter(({ code }) => {
+            if (code === "wsl-paste-screenshot") {
+                document.getElementById("btnScreenshot").click();
+            } else if (code === "wsl-paste-clipboard") {
+                document.getElementById("btnClipboard").click();
+            }
+        });
+    </script>
+</body>
+</html>
