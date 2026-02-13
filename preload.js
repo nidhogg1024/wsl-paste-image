@@ -44,15 +44,20 @@ function genFileName() {
 
 /** 检测截图工具，返回 { path, args } 或 null */
 function detectTool() {
+    const LOCAL = process.env.LOCALAPPDATA || "";
+    const PROGRAMS = process.env.PROGRAMFILES || "";
+    const PROGRAMS86 = process.env["PROGRAMFILES(X86)"] || "";
+    // Windows 常见安装目录：AppData\Local\{name}\、AppData\Local\Programs\{name}\、Program Files\{name}\
+    const baseDirs = [LOCAL, path.join(LOCAL, "Programs"), PROGRAMS, PROGRAMS86].filter(Boolean);
+
     const tools = [
-        { name: "PixPin", exe: "PixPin.exe", dirs: [process.env.LOCALAPPDATA, process.env.PROGRAMFILES], args: ["screenshot"] },
-        { name: "Snipaste", exe: "Snipaste.exe", dirs: [process.env.LOCALAPPDATA, process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"]], args: ["snip"] },
-        { name: "ShareX", exe: "ShareX.exe", dirs: [process.env.LOCALAPPDATA, process.env.PROGRAMFILES], args: ["-RectangleRegion"] },
+        { name: "PixPin", exe: "PixPin.exe", args: ["screenshot"] },
+        { name: "Snipaste", exe: "Snipaste.exe", args: ["snip"] },
+        { name: "ShareX", exe: "ShareX.exe", args: ["-RectangleRegion"] },
     ];
     for (const t of tools) {
-        // 检查常见安装路径
-        for (const dir of t.dirs) {
-            if (!dir) continue;
+        // 遍历所有可能的安装路径
+        for (const dir of baseDirs) {
             const p = path.join(dir, t.name, t.exe);
             if (fs.existsSync(p)) return { path: p, args: t.args, name: t.name };
         }
